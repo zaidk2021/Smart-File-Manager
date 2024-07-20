@@ -85,8 +85,8 @@ function App({ onLogout }) {
   const handleUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
-      if (file.size > 2000000) {
-        alert("File size should not exceed 2000 KB.");
+      if (file.size > 10000000) {
+        alert("File size should not exceed 10000 KB.");
         return;
       }
       if (file.type !== 'application/pdf') {
