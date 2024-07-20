@@ -98,4 +98,15 @@
   .button {
     margin: 0 5px;
   }
+ 
+  .wheatButton {
+    background-color: wheat !important;
+    color: black !important;
+  }
+  
+  .wheatButton:hover {
+    background-color: #f5deb3 !important;
+  }
+  
+  
 }

@@ -19,10 +19,25 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { CloudUpload, Edit, Delete, Memory, Add, ExitToApp } from '@mui/icons-material';
+import { CloudUpload, Edit, Delete, Memory, Add, ExitToApp, Share } from '@mui/icons-material';
 import { jsPDF } from 'jspdf';
+import { initializeApp } from 'firebase/app';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import style from './LoginScreen.module.css';
 import './App.css';
+
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID,
+};
+
+const app = initializeApp(firebaseConfig);
+const storage = getStorage(app);
 
 function App({ onLogout }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,11 +53,12 @@ function App({ onLogout }) {
   const [newFilename, setNewFilename] = useState('');
   const [user, setUser] = useState(null);
   const [sortOption, setSortOption] = useState('uploadDate');
+  const [isLoading, setIsLoading] = useState(false);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const handleFetchResponse = useCallback((response) => {
+  const handleFetchResponse = useCallback(async (response) => {
     if (!response.ok) {
       if (response.status === 403) {
         alert('Your session has expired. Please log in again.');
@@ -51,10 +67,16 @@ function App({ onLogout }) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
     }
-    return response.json();
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    } else {
+      throw new Error('Expected JSON response from server.');
+    }
   }, [onLogout]);
 
   const fetchAllPdfs = useCallback(() => {
+    setIsLoading(true);
     fetch(`${process.env.REACT_APP_API_URL}/search`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -62,7 +84,8 @@ function App({ onLogout }) {
     })
       .then(handleFetchResponse)
       .then(data => setSearchResults(data))
-      .catch(error => console.error('Error fetching user PDFs:', error));
+      .catch(error => console.error('Error fetching user PDFs:', error))
+      .finally(() => setIsLoading(false));
   }, [handleFetchResponse]);
 
   useEffect(() => {
@@ -104,6 +127,7 @@ function App({ onLogout }) {
         },
       })
         .then(handleFetchResponse)
+        .then(() => fetchAllPdfs())  // Reload files after upload
         .catch(error => console.error('Error uploading PDF:', error));
     }
   };
@@ -290,6 +314,40 @@ function App({ onLogout }) {
       .catch(error => console.error('Error renaming file:', error));
   };
 
+  const uploadPdfToFirebase = async (filename, content) => {
+    const doc = new jsPDF();
+    doc.text(content, 10, 10);
+    const pdfBlob = doc.output('blob');
+    const pdfRef = ref(storage, filename);
+
+    await uploadBytes(pdfRef, pdfBlob);
+    const downloadURL = await getDownloadURL(pdfRef);
+    return downloadURL;
+  };
+
+  const handleShare = async (filename, content) => {
+    try {
+      const shareableLink = await uploadPdfToFirebase(filename, content);
+      navigator.clipboard.writeText(shareableLink);
+      alert(`Shareable link copied to clipboard`);
+    } catch (error) {
+      console.error('Error generating shareable link:', error);
+      alert('Error generating shareable link. Please try again.');
+    }
+  };
+
+  const handleDisableShare = async (filename) => {
+    try {
+      const fileRef = ref(storage, filename);
+      await deleteObject(fileRef);
+      alert(`Sharing disabled for ${filename}.`);
+      fetchAllPdfs();
+    } catch (error) {
+      console.error('Error disabling sharing:', error);
+      alert('Error disabling sharing. Please try again.');
+    }
+  };
+
   return (
     <div className="App">
       <AppBar position="static" className="toolbar">
@@ -334,9 +392,9 @@ function App({ onLogout }) {
           </label>
 
           <IconButton color="inherit" onClick={handleChatWithPdf} className="iconButton">
-  <Memory />
-  <span style={{ fontSize: '0.875rem', fontWeight: 'normal' }}>{isMobile ? 'Chat' : 'Chat with PDFs'}</span>
-</IconButton>
+            <Memory />
+            <span style={{ fontSize: '0.875rem', fontWeight: 'normal' }}>{isMobile ? 'Chat' : 'Chat with PDFs'}</span>
+          </IconButton>
 
           <Button color="inherit" onClick={handleLogout} startIcon={<ExitToApp />} style={{ marginLeft: 'auto' }}>
             {isMobile ? 'Logout' : 'Logout'}
@@ -344,28 +402,38 @@ function App({ onLogout }) {
         </Toolbar>
       </AppBar>
       <div>
-        {searchResults.map((result) => (
-          <div key={result._id} className="resultBar">
-            <span
-              style={{ color: 'blue', cursor: 'pointer' }}
-              onClick={() => generatePdf(result.filename, result.content)}
-            >
-              {result.filename} - Uploaded on {new Date(result.uploadDate).toLocaleDateString()}
-            </span>
-            <div className="iconContainer">
-              <IconButton onClick={() => openEditDialog(result.content, result._id)} className="iconButton"><Edit /></IconButton>
-              <Button onClick={() => openRenameDialog(result._id)} className="button">
-                Rename
-              </Button>
-              {user && user.id === result.createdBy.toString() && (
-                <IconButton onClick={() => handleDelete(result._id)} className="iconButton"><Delete /></IconButton>
-              )}
-              <Button onClick={() => generatePdf(result.filename, result.content)} className="button">
-                Generate PDF
-              </Button>
+        {isLoading ? (
+          <Typography variant="h6" align="center">Loading...</Typography>
+        ) : (
+          searchResults.map((result) => (
+            <div key={result._id} className="resultBar">
+              <span
+                style={{ color: 'blue', cursor: 'pointer' }}
+                onClick={() => generatePdf(result.filename, result.content)}
+              >
+                {result.filename} - Uploaded on {new Date(result.uploadDate).toLocaleDateString()}
+              </span>
+              <div className="iconContainer">
+                <IconButton onClick={() => openEditDialog(result.content, result._id)} className="iconButton"><Edit /></IconButton>
+                <Button onClick={() => openRenameDialog(result._id)} className="button wheatButton">
+                  Rename
+                </Button>
+                {user && user.id === result.createdBy.toString() && (
+                  <IconButton onClick={() => handleDelete(result._id)} className="iconButton"><Delete /></IconButton>
+                )}
+                <Button onClick={() => generatePdf(result.filename, result.content)} className="button wheatButton">
+                  Generate PDF
+                </Button>
+                <Button onClick={() => handleShare(result.filename, result.content)} className="button wheatButton" startIcon={<Share />}>
+                  Share
+                </Button>
+                <Button onClick={() => handleDisableShare(result.filename)} className="button wheatButton">
+                  Disable Sharing
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
       <Dialog open={editDialogOpen} onClose={closeEditDialog}>
         <DialogTitle>Edit PDF Content</DialogTitle>
