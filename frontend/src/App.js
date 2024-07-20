@@ -15,12 +15,14 @@ import {
   Select,
   InputLabel,
   Typography,
-  Paper
+  Paper,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { CloudUpload, Edit, Delete, Memory, Add, ExitToApp } from '@mui/icons-material';
-import zromeLogo from './chrome-logo.webp';
 import { jsPDF } from 'jspdf';
 import style from './LoginScreen.module.css';
+import './App.css';
 
 function App({ onLogout }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,13 +31,16 @@ function App({ onLogout }) {
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [chatDialogOpen, setChatDialogOpen] = useState(false);
   const [chatQuestion, setChatQuestion] = useState('');
-  const [chatHistory, setChatHistory] = useState([]); 
+  const [chatHistory, setChatHistory] = useState([]);
   const [currentEditContent, setCurrentEditContent] = useState('');
   const [currentEditId, setCurrentEditId] = useState(null);
   const [currentRenameId, setCurrentRenameId] = useState(null);
   const [newFilename, setNewFilename] = useState('');
   const [user, setUser] = useState(null);
-  const [sortOption, setSortOption] = useState('uploadDate'); 
+  const [sortOption, setSortOption] = useState('uploadDate');
+
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const handleFetchResponse = useCallback((response) => {
     if (!response.ok) {
@@ -74,21 +79,19 @@ function App({ onLogout }) {
       onLogout();
     }
 
-
     fetchAllPdfs();
-
   }, [onLogout, fetchAllPdfs]);
 
   const handleUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
-      if (file.size > 2000000) { // 1000 kilobytes * 1000 to convert to bytes
-        alert("File size should not exceed 1000 KB.");
-        return; 
+      if (file.size > 2000000) {
+        alert("File size should not exceed 2000 KB.");
+        return;
       }
       if (file.type !== 'application/pdf') {
         alert("Only PDF files are accepted.");
-        return; 
+        return;
       }
       const formData = new FormData();
       formData.append('file', file);
@@ -114,7 +117,7 @@ function App({ onLogout }) {
     const sortedResults = [...searchResults].sort((a, b) => {
       if (sortBy === 'filename') {
         return a.filename.localeCompare(b.filename);
-      } else { 
+      } else {
         return new Date(b.uploadDate) - new Date(a.uploadDate);
       }
     });
@@ -136,7 +139,6 @@ function App({ onLogout }) {
         })
         .catch(error => console.error('Error fetching search results:', error));
     } else {
-      
       fetchAllPdfs();
     }
   };
@@ -187,8 +189,8 @@ function App({ onLogout }) {
     })
       .then(handleFetchResponse)
       .then(data => {
-        setChatHistory([...chatHistory, { question: chatQuestion, response: data.reply }]); 
-        setChatQuestion(''); 
+        setChatHistory([...chatHistory, { question: chatQuestion, response: data.reply }]);
+        setChatQuestion('');
       })
       .catch(error => {
         alert('Error chatting with PDF: ' + error.message);
@@ -210,59 +212,10 @@ function App({ onLogout }) {
     window.open(currentUrl, '_blank');
   };
 
-  const resultBarStyles = {
-    display: 'flex',
-    alignItems: 'center',
-    padding: '5px',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    margin: '10px 0',
-    borderRadius: '5px',
-  };
-
-  const iconContainerStyles = {
-    display: 'flex',
-    alignItems: 'center',
-  };
-
   const generatePdf = (filename, content) => {
     const doc = new jsPDF();
     doc.text(content, 10, 10);
     doc.save(filename);
-  };
-  
-  const appStyles = {
-    backgroundImage: `url(${zromeLogo})`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    minHeight: '100vh',
-    color: '#fff',
-  };
-
-  const toolbarStyles = {
-    background: '#fff',
-    color: 'black',
-  };
-
-  const inputBaseStyles = {
-    flex: 1,
-    marginLeft: '10px',
-    border: '1px solid #ccc',
-    padding: '5px 20px',
-    borderRadius: '4px',
-    width: '60%',
-  };
-
-  const iconButtonStyles = {
-    color: '#555',
-    fontSize: '1rem',
-    margin: 0,
-    padding: 0,
-  };
-
-  const buttonStyles = {
-    backgroundColor: 'wheat',
-    color: '#555',
-    margin: '0 5px'
   };
 
   const openEditDialog = (content, id) => {
@@ -338,32 +291,35 @@ function App({ onLogout }) {
   };
 
   return (
-    <div className="App" style={appStyles}>
-      <AppBar position="static" style={toolbarStyles}>
+    <div className="App">
+      <AppBar position="static" className="toolbar">
         <Toolbar>
-          <IconButton edge="start" style={iconButtonStyles} aria-label="add new" onClick={openNewTab}>
+          <IconButton edge="start" className="iconButton" aria-label="add new" onClick={openNewTab}>
             <Add />
           </IconButton>
 
           <InputBase
-            style={inputBaseStyles}
-            placeholder="Search or type URL"
+            className="inputBase"
+            placeholder="Search file"
             inputProps={{ 'aria-label': 'search or type url' }}
             value={searchTerm}
             onChange={handleSearch}
+            style={{ width: isMobile ? '60%' : 'auto' }}
           />
-          <FormControl style={{ marginLeft: 10, minWidth: 120 }}>
-            <InputLabel id="sort-by-label">Sort By</InputLabel>
-            <Select
-              labelId="sort-by-label"
-              value={sortOption}
-              onChange={handleSortChange}
-              style={{ backgroundColor: 'white', height: '40px' }}
-            >
-              <MenuItem value="filename">Filename</MenuItem>
-              <MenuItem value="uploadDate">Upload Date</MenuItem>
-            </Select>
-          </FormControl>
+          {!isMobile && (
+            <FormControl style={{ marginLeft: 10, minWidth: 120 }}>
+              <InputLabel id="sort-by-label">Sort By</InputLabel>
+              <Select
+                labelId="sort-by-label"
+                value={sortOption}
+                onChange={handleSortChange}
+                style={{ backgroundColor: 'white', height: '40px' }}
+              >
+                <MenuItem value="filename">Filename</MenuItem>
+                <MenuItem value="uploadDate">Upload Date</MenuItem>
+              </Select>
+            </FormControl>
+          )}
           <input
             accept="application/pdf"
             style={{ display: 'none' }}
@@ -372,38 +328,39 @@ function App({ onLogout }) {
             onChange={handleUpload}
           />
           <label htmlFor="upload-button-file">
-            <Button color="inherit" component="span" startIcon={<CloudUpload />} style={iconButtonStyles}>
-              Upload PDF
+            <Button color="inherit" component="span" startIcon={<CloudUpload />} className="iconButton">
+              {isMobile ? 'Upload' : 'Upload PDF'}
             </Button>
           </label>
-         
-          <IconButton color="inherit" onClick={handleChatWithPdf} style={iconButtonStyles}>
-            <Memory />
-            Chat with PDFs
-          </IconButton>
+
+          <IconButton color="inherit" onClick={handleChatWithPdf} className="iconButton">
+  <Memory />
+  <span style={{ fontSize: '0.875rem', fontWeight: 'normal' }}>{isMobile ? 'Chat' : 'Chat with PDFs'}</span>
+</IconButton>
+
           <Button color="inherit" onClick={handleLogout} startIcon={<ExitToApp />} style={{ marginLeft: 'auto' }}>
-            Logout
+            {isMobile ? 'Logout' : 'Logout'}
           </Button>
         </Toolbar>
       </AppBar>
       <div>
         {searchResults.map((result) => (
-          <div key={result._id} style={resultBarStyles}>
+          <div key={result._id} className="resultBar">
             <span
               style={{ color: 'blue', cursor: 'pointer' }}
               onClick={() => generatePdf(result.filename, result.content)}
             >
               {result.filename} - Uploaded on {new Date(result.uploadDate).toLocaleDateString()}
             </span>
-            <div style={iconContainerStyles}>
-              <IconButton onClick={() => openEditDialog(result.content, result._id)} style={iconButtonStyles}><Edit /></IconButton>
-              <Button onClick={() => openRenameDialog(result._id)} style={buttonStyles}>
+            <div className="iconContainer">
+              <IconButton onClick={() => openEditDialog(result.content, result._id)} className="iconButton"><Edit /></IconButton>
+              <Button onClick={() => openRenameDialog(result._id)} className="button">
                 Rename
               </Button>
               {user && user.id === result.createdBy.toString() && (
-                <IconButton onClick={() => handleDelete(result._id)} style={iconButtonStyles}><Delete /></IconButton>
+                <IconButton onClick={() => handleDelete(result._id)} className="iconButton"><Delete /></IconButton>
               )}
-              <Button onClick={() => generatePdf(result.filename, result.content)} style={buttonStyles}>
+              <Button onClick={() => generatePdf(result.filename, result.content)} className="button">
                 Generate PDF
               </Button>
             </div>

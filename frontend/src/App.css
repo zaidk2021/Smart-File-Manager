@@ -1,5 +1,10 @@
 .App {
   text-align: center;
+  background-image: url('./chrome-logo.webp');
+  background-size: cover;
+  background-position: center;
+  min-height: 100vh;
+  color: #fff;
 }
 
 .App-logo {
@@ -34,5 +39,63 @@
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+.toolbar {
+  background: #fff;
+  color: black;
+}
+
+.inputBase {
+  flex: 1;
+  margin-left: 10px;
+  border: 1px solid #ccc;
+  padding: 5px 20px;
+  border-radius: 4px;
+  width: 60%;
+}
+
+.resultBar {
+  display: flex;
+  align-items: center;
+  padding: 5px;
+  background-color: rgba(255, 255, 255, 0.8);
+  margin: 10px 0;
+  border-radius: 5px;
+}
+
+.iconContainer {
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .inputBase {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .resultBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .iconContainer {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .iconButton {
+    font-size: 1rem;
+  }
+
+  .button {
+    margin: 0 5px;
   }
 }

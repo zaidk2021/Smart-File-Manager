@@ -30,7 +30,8 @@ router.post('/login', async (req, res) => {
         return res.status(401).send('Authentication failed. User not found.');
       }
       if (await user.comparePassword(password)) {
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '5h' });
+
         console.log({ message: 'Authentication successful'});
 
         res.json({ message: 'Authentication successful', token, user: { id: user._id, username: user.username} });
