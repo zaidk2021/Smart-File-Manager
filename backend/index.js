@@ -58,23 +58,37 @@ app.post('/upload', authenticateToken, upload.single('file'), (req, res) => {
 
   const userId = req.userId;
 
-  PDFParse(req.file.buffer)
-    .then(data => {
-      const newPdf = new PDF({
-        title: 'Untitled PDF',
-        content: data.text,
-        filename: req.file.originalname,
-        createdBy: userId
-      });
-      console.log(newPdf);
-      return newPdf.save();
+ 
+  PDF.findOne({ filename: req.file.originalname, createdBy: userId })
+    .then(existingPdf => {
+      if (existingPdf) {
+        
+        return res.status(400).json({ message: 'A file with this filename already exists.' });
+      }
+
+      // If no file exists, parse and save the new PDF
+      return PDFParse(req.file.buffer)
+        .then(data => {
+          const newPdf = new PDF({
+            title: 'Untitled PDF',
+            content: data.text,
+            filename: req.file.originalname,
+            createdBy: userId
+          });
+          return newPdf.save();
+        })
+        .then(doc => res.json({ message: 'PDF uploaded and indexed!', id: doc._id }))
+        .catch(error => {
+          console.error('Error handling the PDF:', error);
+          res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+        });
     })
-    .then(doc => res.json({ message: 'PDF uploaded and indexed!', id: doc._id }))
     .catch(error => {
-      console.error('Error handling the PDF:', error);
-      res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+      console.error('Error checking existing PDF:', error);
+      res.status(500).json({ message: 'Failed to check existing PDF', error: error.toString() });
     });
 });
+
 
 
 app.post('/chat-with-pdf', authenticateToken, async (req, res) => {

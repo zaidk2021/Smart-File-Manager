@@ -22,7 +22,7 @@ import {
 import { CloudUpload, Edit, Delete, Memory, Add, ExitToApp, Share } from '@mui/icons-material';
 import { jsPDF } from 'jspdf';
 import { initializeApp } from 'firebase/app';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, getMetadata } from 'firebase/storage';
 import style from './LoginScreen.module.css';
 import './App.css';
 
@@ -116,9 +116,10 @@ function App({ onLogout }) {
         alert("Only PDF files are accepted.");
         return;
       }
+  
       const formData = new FormData();
       formData.append('file', file);
-
+  
       fetch(`${process.env.REACT_APP_API_URL}/upload`, {
         method: 'POST',
         body: formData,
@@ -126,9 +127,26 @@ function App({ onLogout }) {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
       })
-        .then(handleFetchResponse)
-        .then(() => fetchAllPdfs())  // Reload files after upload
-        .catch(error => console.error('Error uploading PDF:', error));
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(errorData => {
+            throw new Error(errorData.message || 'Unknown error occurred');
+          });
+        }
+        return response.json();
+      })
+      .then(data => {
+        alert('PDF uploaded and indexed!');
+        fetchAllPdfs();  // Reload files after upload
+      })
+      .catch(error => {
+        if (error.message === 'A file with this filename already exists.') {
+          alert(error.message);
+        } else {
+          console.error('Error uploading PDF:', error);
+          alert('Error uploading PDF. Please try again.');
+        }
+      });
     }
   };
 
@@ -167,7 +185,7 @@ function App({ onLogout }) {
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = (id, filename) => {
     const user = JSON.parse(localStorage.getItem('user'));
 
     if (!user) {
@@ -191,7 +209,12 @@ function App({ onLogout }) {
     })
       .then(handleFetchResponse)
       .then(() => {
+        const fileRef = ref(storage, `${filename}_${id}`);
+        return deleteObject(fileRef);
+      })
+      .then(() => {
         setSearchResults(searchResults.filter(result => result._id !== id));
+        alert('PDF deleted and sharing disabled.');
       })
       .catch(error => {
         alert('Error deleting PDF: ' + error.message);
@@ -314,20 +337,20 @@ function App({ onLogout }) {
       .catch(error => console.error('Error renaming file:', error));
   };
 
-  const uploadPdfToFirebase = async (filename, content) => {
+  const uploadPdfToFirebase = async (filename, content, id) => {
     const doc = new jsPDF();
     doc.text(content, 10, 10);
     const pdfBlob = doc.output('blob');
-    const pdfRef = ref(storage, filename);
+    const pdfRef = ref(storage, `${filename}_${id}`);
 
     await uploadBytes(pdfRef, pdfBlob);
     const downloadURL = await getDownloadURL(pdfRef);
     return downloadURL;
   };
 
-  const handleShare = async (filename, content) => {
+  const handleShare = async (filename, content, id) => {
     try {
-      const shareableLink = await uploadPdfToFirebase(filename, content);
+      const shareableLink = await uploadPdfToFirebase(filename, content, id);
       navigator.clipboard.writeText(shareableLink);
       alert(`Shareable link copied to clipboard`);
     } catch (error) {
@@ -336,9 +359,14 @@ function App({ onLogout }) {
     }
   };
 
-  const handleDisableShare = async (filename) => {
+  const handleDisableShare = async (filename, id) => {
     try {
-      const fileRef = ref(storage, filename);
+      const fileRef = ref(storage, `${filename}_${id}`);
+      const fileExists = await getMetadata(fileRef).then(() => true).catch(() => false);
+      if (!fileExists) {
+        alert(`No sharing exists for ${filename}.`);
+        return;
+      }
       await deleteObject(fileRef);
       alert(`Sharing disabled for ${filename}.`);
       fetchAllPdfs();
@@ -419,15 +447,15 @@ function App({ onLogout }) {
                   Rename
                 </Button>
                 {user && user.id === result.createdBy.toString() && (
-                  <IconButton onClick={() => handleDelete(result._id)} className="iconButton"><Delete /></IconButton>
+                  <IconButton onClick={() => handleDelete(result._id, result.filename)} className="iconButton"><Delete /></IconButton>
                 )}
                 <Button onClick={() => generatePdf(result.filename, result.content)} className="button wheatButton">
                   Generate PDF
                 </Button>
-                <Button onClick={() => handleShare(result.filename, result.content)} className="button wheatButton" startIcon={<Share />}>
+                <Button onClick={() => handleShare(result.filename, result.content, result._id)} className="button wheatButton" startIcon={<Share />}>
                   Share
                 </Button>
-                <Button onClick={() => handleDisableShare(result.filename)} className="button wheatButton">
+                <Button onClick={() => handleDisableShare(result.filename, result._id)} className="button wheatButton">
                   Disable Sharing
                 </Button>
               </div>
