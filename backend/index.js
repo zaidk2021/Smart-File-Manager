@@ -66,7 +66,7 @@ app.post('/upload', authenticateToken, upload.single('file'), (req, res) => {
         return res.status(400).json({ message: 'A file with this filename already exists.' });
       }
 
-      // If no file exists, parse and save the new PDF
+      
       return PDFParse(req.file.buffer)
         .then(data => {
           const newPdf = new PDF({
