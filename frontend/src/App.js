@@ -112,11 +112,6 @@ function App({ onLogout }) {
         alert("File size should not exceed 10 MB.");
         return;
       }
-      if (file.type !== 'application/pdf') {
-        alert("Only PDF files are accepted.");
-        return;
-      }
-  
       const formData = new FormData();
       formData.append('file', file);
   
@@ -136,19 +131,20 @@ function App({ onLogout }) {
         return response.json();
       })
       .then(data => {
-        alert('PDF uploaded and indexed!');
-        fetchAllPdfs();  // Reload files after upload
+        alert('File uploaded and processed!');
+        fetchAllPdfs(); 
       })
       .catch(error => {
         if (error.message === 'A file with this filename already exists.') {
           alert(error.message);
         } else {
-          console.error('Error uploading PDF:', error);
-          alert('Error uploading PDF. Please try again.');
+          console.error('Error uploading file:', error);
+          alert('Error uploading file. Please try again.');
         }
       });
     }
   };
+  
 
   const handleSortChange = (event) => {
     setSortOption(event.target.value);
@@ -407,7 +403,7 @@ function App({ onLogout }) {
             </FormControl>
           )}
           <input
-            accept="application/pdf"
+            accept="application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             style={{ display: 'none' }}
             id="upload-button-file"
             type="file"
@@ -415,7 +411,7 @@ function App({ onLogout }) {
           />
           <label htmlFor="upload-button-file">
             <Button color="inherit" component="span" startIcon={<CloudUpload />} className="iconButton">
-              {isMobile ? 'Upload' : 'Upload PDF'}
+              {isMobile ? 'Upload' : 'Upload File'}
             </Button>
           </label>
 

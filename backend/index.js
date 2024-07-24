@@ -11,12 +11,15 @@ const PDF = require('./models/Pdf');
 const authRoutes = require('./authRoutes');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const archiver = require('archiver');
+const { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } = require('firebase/storage');
+const docxConverter = require('docx-pdf');
+const { initializeApp } = require('firebase/app');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/api', authRoutes);
-
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -24,11 +27,9 @@ const upload = multer({ storage });
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri);
 
-
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to Database'))
   .catch(err => console.error('Could not connect to MongoDB', err));
-
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -51,44 +52,95 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-app.post('/upload', authenticateToken, upload.single('file'), (req, res) => {
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID,
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const storage1 = getStorage(firebaseApp);
+
+app.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).send('No file uploaded.');
   }
 
   const userId = req.userId;
+  const fileType = req.file.mimetype;
+  const originalFilename = req.file.originalname;
 
- 
-  PDF.findOne({ filename: req.file.originalname, createdBy: userId })
-    .then(existingPdf => {
-      if (existingPdf) {
-        
-        return res.status(400).json({ message: 'A file with this filename already exists.' });
-      }
-
-      
-      return PDFParse(req.file.buffer)
-        .then(data => {
-          const newPdf = new PDF({
-            title: 'Untitled PDF',
-            content: data.text,
-            filename: req.file.originalname,
-            createdBy: userId
-          });
-          return newPdf.save();
-        })
-        .then(doc => res.json({ message: 'PDF uploaded and indexed!', id: doc._id }))
-        .catch(error => {
-          console.error('Error handling the PDF:', error);
-          res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+  if (fileType === 'application/pdf') {
+    
+    PDF.findOne({ filename: originalFilename, createdBy: userId })
+      .then(existingPdf => {
+        if (existingPdf) {
+          return res.status(400).json({ message: 'A file with this filename already exists.' });
+        }
+        return PDFParse(req.file.buffer);
+      })
+      .then(data => {
+        const newPdf = new PDF({
+          title: 'Untitled PDF',
+          content: data.text,
+          filename: originalFilename,
+          createdBy: userId
         });
-    })
-    .catch(error => {
-      console.error('Error checking existing PDF:', error);
-      res.status(500).json({ message: 'Failed to check existing PDF', error: error.toString() });
-    });
-});
+        return newPdf.save();
+      })
+      .then(doc => res.json({ message: 'PDF uploaded and indexed!', id: doc._id }))
+      .catch(error => {
+        console.error('Error handling the PDF:', error);
+        res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+      });
+  } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    
+    const tempPdfFilename = `${originalFilename.split('.')[0]}.pdf`;
+    const tempPdfFilePath = `/tmp/${tempPdfFilename}`;
 
+    const pdfBuffer = await new Promise((resolve, reject) => {
+      fs.writeFile(tempPdfFilePath, req.file.buffer, (err) => {
+        if (err) return reject(err);
+        docxConverter(tempPdfFilePath, tempPdfFilePath, function(err) {
+          if (err) return reject(err);
+          fs.readFile(tempPdfFilePath, (err, data) => {
+            if (err) return reject(err);
+            resolve(data);
+          });
+        });
+      });
+    });
+
+    const pdfRef = ref(storage1, `${tempPdfFilename}_${userId}`);
+    await uploadBytes(pdfRef, pdfBuffer);
+    const downloadURL = await getDownloadURL(pdfRef);
+    
+    PDFParse(pdfBuffer)
+      .then(data => {
+        const newPdf = new PDF({
+          title: 'Untitled PDF',
+          content: data.text,
+          filename: originalFilename, 
+          createdBy: userId
+        });
+        return newPdf.save();
+      })
+      .then(doc => {
+        deleteObject(pdfRef);
+        fs.unlinkSync(tempPdfFilePath); 
+        res.json({ message: 'DOCX converted to PDF, uploaded and indexed!', id: doc._id });
+      })
+      .catch(error => {
+        console.error('Error handling the DOCX to PDF conversion:', error);
+        res.status(500).json({ message: 'Failed to process DOCX file', error: error.toString() });
+      });
+  } else {
+    return res.status(400).send('Unsupported file type.');
+  }
+});
 
 
 app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
@@ -102,17 +154,14 @@ app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
 
     const objectId = new mongoose.Types.ObjectId(userId);
 
-   
     const pdfs = await pdfCollection.find({ createdBy: objectId }).toArray();
 
     if (pdfs.length === 0) {
       return res.status(404).send('No PDFs found for the user.');
     }
 
-   
     const pdfData = pdfs.map(pdf => `Title: ${pdf.filename}, Content: ${pdf.content}`).join(' ');
 
-  
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
     const prompt = `Using the following PDFs: ${pdfData}, answer the question: ${question}.Give the response in not more than 5 lines.Keep it direct.`;
@@ -133,7 +182,6 @@ app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
     await client.close();
   }
 });
-
 
 app.get('/search', authenticateToken, (req, res) => {
   const query = req.query.query;
@@ -163,7 +211,6 @@ app.get('/search', authenticateToken, (req, res) => {
       res.status(400).json('Error: ' + err);
     });
 });
-
 
 app.delete('/delete/:id', authenticateToken, async (req, res) => {
   try {
@@ -208,7 +255,6 @@ app.put('/update/:id', (req, res) => {
     .then(updatedPdf => res.json(updatedPdf))
     .catch(err => res.status(400).json('Error: ' + err));
 });
-
 
 app.put('/rename/:id', authenticateToken, async (req, res) => {
   try {
@@ -255,9 +301,6 @@ app.put('/rename/:id', authenticateToken, async (req, res) => {
     await client.close();
   }
 });
-
-
-
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
