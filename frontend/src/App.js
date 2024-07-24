@@ -183,19 +183,19 @@ function App({ onLogout }) {
 
   const handleDelete = (id, filename) => {
     const user = JSON.parse(localStorage.getItem('user'));
-
+  
     if (!user) {
       alert('You are not authorized to delete this PDF.');
       return;
     }
-
+  
     const result = searchResults.find(res => res._id === id && res.createdBy === user.id);
-
+  
     if (!result) {
       alert('You are not authorized to delete this PDF.');
       return;
     }
-
+  
     fetch(`${process.env.REACT_APP_API_URL}/delete/${id}`, {
       method: 'DELETE',
       headers: {
@@ -205,17 +205,15 @@ function App({ onLogout }) {
     })
       .then(handleFetchResponse)
       .then(() => {
-        const fileRef = ref(storage, `${filename}_${id}`);
-        return deleteObject(fileRef);
-      })
-      .then(() => {
+        // Don't delete the file from Firebase Storage in the frontend
         setSearchResults(searchResults.filter(result => result._id !== id));
-        alert('PDF deleted and sharing disabled.');
+        fetchAllPdfs(); // Reload the PDFs after deletion
       })
       .catch(error => {
         alert('Error deleting PDF: ' + error.message);
       });
   };
+  
 
   const handleChatWithPdf = () => {
     setChatDialogOpen(true);
@@ -257,10 +255,20 @@ function App({ onLogout }) {
 
   const generatePdf = (filename, content) => {
     const doc = new jsPDF();
-    doc.text(content, 10, 10);
-    doc.save(filename);
+    const lines = doc.splitTextToSize(content, 180); 
+    let y = 10;
+    lines.forEach((line, index) => {
+      if (y > 280) { 
+        doc.addPage();
+        y = 10;
+      }
+      doc.text(line, 10, y);
+      y += 10;
+    });
+    doc.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
   };
-
+  
+  
   const openEditDialog = (content, id) => {
     setCurrentEditContent(content);
     setCurrentEditId(id);
@@ -335,7 +343,7 @@ function App({ onLogout }) {
 
   const uploadPdfToFirebase = async (filename, content, id) => {
     const doc = new jsPDF();
-    doc.text(content, 10, 10);
+    doc.text(content, 5, 5);
     const pdfBlob = doc.output('blob');
     const pdfRef = ref(storage, `${filename}_${id}`);
 
@@ -435,7 +443,7 @@ function App({ onLogout }) {
                 style={{ color: 'blue', cursor: 'pointer' }}
                 onClick={() => generatePdf(result.filename, result.content)}
               >
-                {result.filename} - Uploaded on {new Date(result.uploadDate).toLocaleDateString()}
+                {result.filename.endsWith('.pdf') ? result.filename : `${result.filename}.pdf`} - Uploaded on {new Date(result.uploadDate).toLocaleDateString()}
               </span>
               <div className="iconContainer">
                 <IconButton onClick={() => openEditDialog(result.content, result._id)} className="iconButton"><Edit /></IconButton>

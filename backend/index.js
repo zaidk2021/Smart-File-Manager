@@ -11,10 +11,11 @@ const PDF = require('./models/Pdf');
 const authRoutes = require('./authRoutes');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const archiver = require('archiver');
-const { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } = require('firebase/storage');
-const docxConverter = require('docx-pdf');
+const { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, getMetadata } = require('firebase/storage');
 const { initializeApp } = require('firebase/app');
 const fs = require('fs');
+const mammoth = require('mammoth');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(cors());
@@ -74,74 +75,59 @@ app.post('/upload', authenticateToken, upload.single('file'), async (req, res) =
   const originalFilename = req.file.originalname;
 
   if (fileType === 'application/pdf') {
-    
-    PDF.findOne({ filename: originalFilename, createdBy: userId })
-      .then(existingPdf => {
-        if (existingPdf) {
-          return res.status(400).json({ message: 'A file with this filename already exists.' });
-        }
-        return PDFParse(req.file.buffer);
-      })
-      .then(data => {
-        const newPdf = new PDF({
-          title: 'Untitled PDF',
-          content: data.text,
-          filename: originalFilename,
-          createdBy: userId
-        });
-        return newPdf.save();
-      })
-      .then(doc => res.json({ message: 'PDF uploaded and indexed!', id: doc._id }))
-      .catch(error => {
-        console.error('Error handling the PDF:', error);
-        res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+    try {
+      const existingPdf = await PDF.findOne({ filename: originalFilename, createdBy: userId });
+      if (existingPdf) {
+        return res.status(400).json({ message: 'A file with this filename already exists.' });
+      }
+
+      const data = await PDFParse(req.file.buffer);
+      const newPdf = new PDF({
+        title: 'Untitled PDF',
+        content: data.text,
+        filename: originalFilename,
+        createdBy: userId,
       });
+      const doc = await newPdf.save();
+      return res.json({ message: 'PDF uploaded and indexed!', id: doc._id });
+    } catch (error) {
+      console.error('Error handling the PDF:', error);
+      return res.status(500).json({ message: 'Failed to process PDF', error: error.toString() });
+    }
   } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    
-    const tempPdfFilename = `${originalFilename.split('.')[0]}.pdf`;
-    const tempPdfFilePath = `/tmp/${tempPdfFilename}`;
+    try {
+      const { value: html } = await mammoth.convertToHtml({ buffer: req.file.buffer });
 
-    const pdfBuffer = await new Promise((resolve, reject) => {
-      fs.writeFile(tempPdfFilePath, req.file.buffer, (err) => {
-        if (err) return reject(err);
-        docxConverter(tempPdfFilePath, tempPdfFilePath, function(err) {
-          if (err) return reject(err);
-          fs.readFile(tempPdfFilePath, (err, data) => {
-            if (err) return reject(err);
-            resolve(data);
-          });
-        });
-      });
-    });
+      const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+      const page = await browser.newPage();
+      await page.setContent(html);
+      const pdfBuffer = await page.pdf({ format: 'A4' });
+      await browser.close();
 
-    const pdfRef = ref(storage1, `${tempPdfFilename}_${userId}`);
-    await uploadBytes(pdfRef, pdfBuffer);
-    const downloadURL = await getDownloadURL(pdfRef);
-    
-    PDFParse(pdfBuffer)
-      .then(data => {
-        const newPdf = new PDF({
-          title: 'Untitled PDF',
-          content: data.text,
-          filename: originalFilename, 
-          createdBy: userId
-        });
-        return newPdf.save();
-      })
-      .then(doc => {
-        deleteObject(pdfRef);
-        fs.unlinkSync(tempPdfFilePath); 
-        res.json({ message: 'DOCX converted to PDF, uploaded and indexed!', id: doc._id });
-      })
-      .catch(error => {
-        console.error('Error handling the DOCX to PDF conversion:', error);
-        res.status(500).json({ message: 'Failed to process DOCX file', error: error.toString() });
+      const tempPdfFilename = `${originalFilename.split('.').slice(0, -1).join('')}.pdf`; 
+      const pdfRef = ref(storage1, `${tempPdfFilename}_${userId}`);
+      await uploadBytes(pdfRef, pdfBuffer);
+      const downloadURL = await getDownloadURL(pdfRef);
+
+      const data = await PDFParse(pdfBuffer);
+      const newPdf = new PDF({
+        title: 'Untitled PDF',
+        content: data.text,
+        filename: tempPdfFilename, 
+        createdBy: userId,
       });
+      const doc = await newPdf.save();
+
+      await deleteObject(pdfRef);
+      return res.json({ message: 'DOCX converted to PDF, uploaded and indexed!', id: doc._id });
+    } catch (error) {
+      console.error('Error handling the DOCX to PDF conversion:', error);
+      return res.status(500).json({ message: 'Failed to process DOCX file', error: error.toString() });
+    }
   } else {
     return res.status(400).send('Unsupported file type.');
   }
 });
-
 
 app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
   const { question } = req.body;
@@ -233,10 +219,28 @@ app.delete('/delete/:id', authenticateToken, async (req, res) => {
       return res.status(403).send('Unauthorized to delete this PDF.');
     }
 
+    const tempPdfFilename = `${pdf.filename.split('.').slice(0, -1).join('')}.pdf_${userId}`; 
+    const pdfRef = ref(storage1, tempPdfFilename);
+
+    let fileExistsInFirebase = true;
+    try {
+      await getMetadata(pdfRef); 
+    } catch (error) {
+      if (error.code === 'storage/object-not-found') {
+        console.warn('File not found in Firebase Storage. Proceeding with deletion from MongoDB.');
+        fileExistsInFirebase = false;
+      } else {
+        throw error;
+      }
+    }
+
     const result = await pdfCollection.deleteOne({ _id: new mongoose.Types.ObjectId(pdfId) });
 
     if (result.deletedCount === 1) {
       console.log("Successfully deleted one document.");
+      if (fileExistsInFirebase) {
+        await deleteObject(pdfRef); // Clean up Firebase storage if the file exists
+      }
       res.json({ message: 'PDF deleted successfully!' });
     } else {
       console.log("No documents matched the query. Deleted 0 documents.");
@@ -249,6 +253,7 @@ app.delete('/delete/:id', authenticateToken, async (req, res) => {
     await client.close();
   }
 });
+
 
 app.put('/update/:id', (req, res) => {
   PDF.findByIdAndUpdate(req.params.id, { content: req.body.content }, { new: true })
