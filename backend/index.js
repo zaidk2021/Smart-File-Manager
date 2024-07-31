@@ -16,6 +16,7 @@ const { initializeApp } = require('firebase/app');
 const fs = require('fs');
 const mammoth = require('mammoth');
 const puppeteer = require('puppeteer');
+const natural=require('natural')
 
 const app = express();
 app.use(cors());
@@ -135,23 +136,51 @@ app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
 
   try {
     await client.connect();
-    const database = client.db('test'); 
-    const pdfCollection = database.collection('pdfs'); 
+    const database = client.db('test');
+    const pdfCollection = database.collection('pdfs');
 
     const objectId = new mongoose.Types.ObjectId(userId);
-
     const pdfs = await pdfCollection.find({ createdBy: objectId }).toArray();
 
     if (pdfs.length === 0) {
       return res.status(404).send('No PDFs found for the user.');
     }
 
-    const pdfData = pdfs.map(pdf => `Title: ${pdf.filename}, Content: ${pdf.content}`).join(' ');
+   
+    const tokenizer = new natural.WordTokenizer();
+    const questionTokens = tokenizer.tokenize(question);
 
+   
+    const filenameMatches = pdfs.filter(pdf => {
+      const filenameTokens = tokenizer.tokenize(pdf.filename);
+      return filenameTokens.some(token => questionTokens.includes(token));
+    });
+
+    let combinedContent;
+    if (filenameMatches.length > 0) {
+    
+      combinedContent = filenameMatches.map(pdf => `Title: ${pdf.filename}, Content: ${pdf.content}`).join(' ');
+    } else {
+   
+      const similarities = pdfs.map(pdf => {
+        const pdfTokens = tokenizer.tokenize(pdf.content);
+        const intersection = questionTokens.filter(token => pdfTokens.includes(token));
+        const similarity = intersection.length / questionTokens.length;
+        return { pdf, similarity };
+      });
+
+     
+      similarities.sort((a, b) => b.similarity - a.similarity);
+
+      const topK = 3;
+      combinedContent = similarities.slice(0, topK).map(s => `Title: ${s.pdf.filename}, Content: ${s.pdf.content}`).join(' ');
+    }
+
+  
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
-    const prompt = `Using the following PDFs: ${pdfData}, answer the question: ${question}.Give the response in not more than 5 lines.Keep it direct.`;
 
+    const prompt = `Using the following PDF contents: ${combinedContent}, answer the question: ${question}. Give the response in not more than 5 lines. Keep it direct.`;
     const result = await model.generateContentStream([prompt]);
 
     let responseText = '';
@@ -160,7 +189,6 @@ app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
     }
 
     res.json({ reply: responseText });
-
   } catch (error) {
     console.error('Error chatting with PDF:', error);
     res.status(500).json({ error: 'Failed to chat with PDF' });
@@ -168,6 +196,8 @@ app.post('/chat-with-pdf', authenticateToken, async (req, res) => {
     await client.close();
   }
 });
+
+
 
 app.get('/search', authenticateToken, (req, res) => {
   const query = req.query.query;
@@ -235,11 +265,11 @@ app.delete('/delete/:id', authenticateToken, async (req, res) => {
     }
 
     const result = await pdfCollection.deleteOne({ _id: new mongoose.Types.ObjectId(pdfId) });
-
+    
     if (result.deletedCount === 1) {
       console.log("Successfully deleted one document.");
       if (fileExistsInFirebase) {
-        await deleteObject(pdfRef); // Clean up Firebase storage if the file exists
+        await deleteObject(pdfRef); 
       }
       res.json({ message: 'PDF deleted successfully!' });
     } else {
