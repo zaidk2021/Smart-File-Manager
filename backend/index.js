@@ -99,12 +99,7 @@ app.post('/upload', authenticateToken, upload.single('file'), async (req, res) =
     try {
       const { value: html } = await mammoth.convertToHtml({ buffer: req.file.buffer });
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        executablePath: process.env.CHROME_BIN || null, // This line uses the CHROME_BIN env variable
-      });
-      
+      const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
       const page = await browser.newPage();
       await page.setContent(html);
       const pdfBuffer = await page.pdf({ format: 'A4' });
