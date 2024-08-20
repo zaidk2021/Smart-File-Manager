@@ -38,7 +38,6 @@ Set up environment variables:
 Create a .env file in the root directory with the following variables:
 
 env
-Copy code
 MONGODB_URI=your-mongodb-uri
 JWT_SECRET=your-jwt-secret
 REACT_APP_FIREBASE_API_KEY=your-firebase-api-key
@@ -53,22 +52,17 @@ Install dependencies:
 
 Install backend dependencies:
 
-bash
-Copy code
+
 cd backend
 npm install
 Install frontend dependencies:
 
-bash
-Copy code
 cd frontend
 npm install
 Build and run the application:
 
 For local development:
 
-bash
-Copy code
 npm run dev
 For production:
 
