@@ -4,7 +4,7 @@
 
 Smart File Manager is a web application built with the MERN stack (MongoDB, Express.js, React.js, Node.js) that allows users to upload, manage, and interact with their files, particularly PDFs. The application features a unique capability to chat with PDFs using Google Generative AI, enabling users to ask questions about the content of their documents and receive intelligent responses.
 
-## Features
+## Features:
 
 - **File Upload:** Upload PDFs and DOCX files.
 - **File Management:** Rename, delete, and search through uploaded files.
